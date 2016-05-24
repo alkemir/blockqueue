@@ -52,7 +52,7 @@ func (q *BlocksQueue) Pop() *OrderedBlock {
 		smallestChild := lChild
 
 		rChild := lChild + 1
-		if rChild < n-2 && (*q)[rChild].Position < (*q)[lChild].Position {
+		if rChild <= n-2 && (*q)[rChild].Position < (*q)[lChild].Position {
 			smallestChild = rChild
 		}
 
