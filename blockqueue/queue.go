@@ -4,6 +4,7 @@ package blockqueue
 type OrderedBlock struct {
 	Position int
 	Hash     string
+	FileID   uint64
 	Content  []byte
 }
 
