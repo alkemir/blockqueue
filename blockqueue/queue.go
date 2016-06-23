@@ -1,6 +1,9 @@
 package blockqueue
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // OrderedBlock holds a block contents and its position on the file for queuing writer
 type OrderedBlock struct {
@@ -20,7 +23,9 @@ type BlocksQueue struct {
 // New returns a pointer to an empty BlocksQueue ready to be used.
 func New() *BlocksQueue {
 	l := &sync.Mutex{}
-	return &BlocksQueue{queue: []*OrderedBlock{&OrderedBlock{Position: -1}}, lock: l, waiter: sync.NewCond(l)}
+	ret := &BlocksQueue{queue: []*OrderedBlock{&OrderedBlock{Position: -1}}, lock: l, waiter: sync.NewCond(l)}
+	go ret.watchdog()
+	return ret
 }
 
 // Len returns the number of elements in the queue
@@ -44,6 +49,8 @@ func (q *BlocksQueue) Push(b *OrderedBlock) {
 		idx = parent
 		parent = idx / 2
 	}
+
+	q.waiter.Signal()
 }
 
 // Pop removes the lowest priority element from the queue and returns it
@@ -96,4 +103,11 @@ func (q BlocksQueue) Wait() {
 	q.lock.Lock()
 	q.waiter.Wait()
 	q.lock.Unlock()
+}
+
+func (q BlocksQueue) watchdog() {
+	for {
+		time.Sleep(2)
+		q.waiter.Signal()
+	}
 }
