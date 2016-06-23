@@ -1,5 +1,7 @@
 package blockqueue
 
+import "sync"
+
 // OrderedBlock holds a block contents and its position on the file for queuing writer
 type OrderedBlock struct {
 	Position int
@@ -9,26 +11,36 @@ type OrderedBlock struct {
 }
 
 // A BlocksQueue is a min-heap of orderedBlocks.
-type BlocksQueue []*OrderedBlock
+type BlocksQueue struct {
+	queue  []*OrderedBlock
+	lock   *sync.Mutex
+	waiter *sync.Cond
+}
 
 // New returns a pointer to an empty BlocksQueue ready to be used.
 func New() *BlocksQueue {
-	return &BlocksQueue{&OrderedBlock{Position: -1}}
+	l := &sync.Mutex{}
+	return &BlocksQueue{queue: []*OrderedBlock{&OrderedBlock{Position: -1}}, lock: l, waiter: sync.NewCond(l)}
 }
 
 // Len returns the number of elements in the queue
 func (q BlocksQueue) Len() int {
-	return len(q) - 1
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	return len(q.queue) - 1
 }
 
 // Push add an element to the queue
 func (q *BlocksQueue) Push(b *OrderedBlock) {
-	idx := len(*q)
-	parent := idx / 2
-	*q = append(*q, b)
+	q.lock.Lock()
+	defer q.lock.Unlock()
 
-	for (*q)[idx].Position < (*q)[parent].Position {
-		(*q)[idx], (*q)[parent] = (*q)[parent], (*q)[idx]
+	idx := len(q.queue)
+	parent := idx / 2
+	q.queue = append(q.queue, b)
+
+	for q.queue[idx].Position < q.queue[parent].Position {
+		q.queue[idx], q.queue[parent] = q.queue[parent], q.queue[idx]
 		idx = parent
 		parent = idx / 2
 	}
@@ -36,10 +48,13 @@ func (q *BlocksQueue) Push(b *OrderedBlock) {
 
 // Pop removes the lowest priority element from the queue and returns it
 func (q *BlocksQueue) Pop() *OrderedBlock {
-	ret := (*q)[1]
-	n := len(*q)
-	(*q)[1] = (*q)[n-1]
-	*q = (*q)[:n-1] // this keeps the reference to the original slice, but it's ok for my use case
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	ret := q.queue[1]
+	n := len(q.queue)
+	q.queue[1] = q.queue[n-1]
+	q.queue = q.queue[:n-1] // this keeps the reference to the original slice, but it's ok for my use case
 	// I don't need to nil the left out element, as I will be checking for len() != 0
 
 	parent := 1
@@ -53,15 +68,15 @@ func (q *BlocksQueue) Pop() *OrderedBlock {
 		smallestChild := lChild
 
 		rChild := lChild + 1
-		if rChild <= n-2 && (*q)[rChild].Position < (*q)[lChild].Position {
+		if rChild <= n-2 && q.queue[rChild].Position < q.queue[lChild].Position {
 			smallestChild = rChild
 		}
 
-		if (*q)[parent].Position < (*q)[smallestChild].Position {
+		if q.queue[parent].Position < q.queue[smallestChild].Position {
 			break
 		}
 
-		(*q)[parent], (*q)[smallestChild] = (*q)[smallestChild], (*q)[parent]
+		q.queue[parent], q.queue[smallestChild] = q.queue[smallestChild], q.queue[parent]
 		parent = smallestChild
 	}
 
@@ -70,5 +85,15 @@ func (q *BlocksQueue) Pop() *OrderedBlock {
 
 // Peek returns the lowest priority element from the queue
 func (q BlocksQueue) Peek() *OrderedBlock {
-	return q[1]
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	return q.queue[1]
+}
+
+// Wait until a new block is pushed
+func (q BlocksQueue) Wait() {
+	q.lock.Lock()
+	q.waiter.Wait()
+	q.lock.Unlock()
 }
